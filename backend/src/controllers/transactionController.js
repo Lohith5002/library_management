@@ -1,6 +1,7 @@
 // src/controllers/transactionController.js
 const TransactionModel = require('../models/transaction');
 const BookModel = require('../models/book');
+const { pool } = require('../config/db');
 
 const TransactionController = {
   // Get all transactions
@@ -38,7 +39,8 @@ const TransactionController = {
   // Get user's active transactions
   getUserTransactions: async (req, res) => {
     try {
-      const userId = req.params.userId || req.user.UserID;
+      const userId = parseInt(req.params.userId || req.user.UserID);
+
       
       // Check if user is requesting their own transactions or is admin/librarian
       if (req.user.UserID !== parseInt(userId) && 
@@ -97,42 +99,86 @@ const TransactionController = {
   },
 
   // Return a book
-  returnBook: async (req, res) => {
-    try {
-      const { transactionId } = req.params;
-      
-      // Get transaction details
-      const transaction = await TransactionModel.getById(transactionId);
-      
-      if (!transaction) {
-        return res.status(404).json({ message: 'Transaction not found' });
-      }
-      
-      // Check if user can return the book (self, librarian, or admin)
-      if (transaction.UserID !== req.user.UserID && 
-          req.user.Role !== 'Admin' && 
-          req.user.Role !== 'Librarian') {
-        return res.status(403).json({ message: 'Access denied' });
-      }
-      
-      // Check if book is already returned
-      if (transaction.Status === 'Returned') {
-        return res.status(400).json({ message: 'Book already returned' });
-      }
-      
-      // Return the book
-      const result = await TransactionModel.returnBook(transactionId);
-      
-      res.json({
-        message: 'Book returned successfully',
-        status: result.status,
-        fineAmount: result.fineAmount
-      });
-    } catch (error) {
-        console.error('Error returning book:', error);
-        res.status(500).json({ message: 'Error returning book', error: error.message });
-      }
-    },
+  // Return a book
+returnBook: async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+
+    // Get transaction details
+    const transaction = await TransactionModel.getById(transactionId);
+
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+
+    // Check if user can return the book
+    if (
+      transaction.UserID !== req.user.UserID &&
+      req.user.Role !== 'Admin' &&
+      req.user.Role !== 'Librarian'
+    ) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (transaction.Status === 'Returned') {
+      return res.status(400).json({ message: 'Book already returned' });
+    }
+
+    // Return the book and update copies
+    const result = await TransactionModel.returnBook(transactionId);
+
+    const bookId = transaction.BookID;
+    console.log("Auth user:", req.user);
+console.log("Transaction:", transaction);
+
+//    // === Auto-fulfill reservation START ===
+// try {
+//   const [reservations] = await pool.query(
+//     `SELECT * FROM reservations 
+//      WHERE BookID = ? AND Status = 'Pending'
+//      ORDER BY ReservedAt ASC LIMIT 1`,
+//     [bookId]
+//   );
+
+//   if (reservations.length > 0) {
+//     const reservation = reservations[0];
+
+//     // Fulfill the reservation
+//     await pool.query(
+//       `UPDATE reservations 
+//        SET Status = 'Fulfilled', FulfilledAt = NOW()
+//        WHERE ReservationID = ?`,
+//       [reservation.ReservationID]
+//     );
+
+//     // Decrease available copies again
+//     await pool.query(
+//       `UPDATE books 
+//        SET AvailableCopies = AvailableCopies - 1 
+//        WHERE BookID = ?`,
+//       [bookId]
+//     );
+
+//     console.log(`📘 Book auto-fulfilled to User ${reservation.UserID}`);
+//   }
+// } catch (fulfillError) {
+//   console.error('❌ Auto-fulfill failed:', fulfillError.message);
+//   // Don't throw — returning still succeeded
+// }
+// // === Auto-fulfill reservation END ===
+
+    return res.json({
+      message: 'Book returned successfully',
+      status: result.status,
+      fineAmount: result.fineAmount
+    });
+
+  } catch (error) {
+    console.error('Error returning book:', error);
+    res.status(500).json({ message: 'Error returning book', error: error.message });
+  }
+},
+
   
     // Update transaction status
     updateTransactionStatus: async (req, res) => {

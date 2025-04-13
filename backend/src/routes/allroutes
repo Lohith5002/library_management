@@ -1,0 +1,148 @@
+// src/routes/auth.js
+const express = require('express');
+const router = express.Router();
+const AuthController = require('../controllers/authController');
+// Register route
+router.post('/register', AuthController.register);
+// Login route
+router.post('/login', AuthController.login);
+module.exports = router;
+// src/routes/books.js
+const express = require('express');
+const router = express.Router();
+const BookController = require('../controllers/bookController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all books - public
+router.get('/', BookController.getAllBooks);
+// Get book by ID - public
+router.get('/:id', BookController.getBookById);
+// Create new book - librarian/admin only
+router.post('/', auth, isLibrarianOrAdmin, BookController.createBook);
+// Update book - librarian/admin only
+router.put('/:id', auth, isLibrarianOrAdmin, BookController.updateBook);
+// Delete book - librarian/admin only
+router.delete('/:id', auth, isLibrarianOrAdmin, BookController.deleteBook);
+module.exports = router;
+// src/routes/categories.js
+const express = require('express');
+const router = express.Router();
+const CategoryController = require('../controllers/categoryController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all categories - public
+router.get('/', CategoryController.getAllCategories);
+// Get category by ID - public
+router.get('/:id', CategoryController.getCategoryById);
+// Get books by category - public
+router.get('/:id/books', CategoryController.getCategoryBooks);
+// Create new category - librarian/admin only
+router.post('/', auth, isLibrarianOrAdmin, CategoryController.createCategory);
+// Update category - librarian/admin only
+router.put('/:id', auth, isLibrarianOrAdmin, CategoryController.updateCategory);
+// Delete category - librarian/admin only
+router.delete('/:id', auth, isLibrarianOrAdmin, CategoryController.deleteCategory);
+module.exports = router;
+// src/routes/fines.js
+const express = require('express');
+const router = express.Router();
+const FineController = require('../controllers/fineController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all fines - admin/librarian only
+router.get('/', auth, isLibrarianOrAdmin, FineController.getAllFines);
+// Get fine by ID
+router.get('/:id', auth, FineController.getFineById);
+// Get user's fines
+router.get('/user/:userId', auth, FineController.getUserFines);
+// Pay fine
+router.post('/:id/pay', auth, FineController.payFine);
+module.exports = router;
+// src/routes/payments.js
+const express = require('express');
+const router = express.Router();
+const PaymentController = require('../controllers/paymentController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all payments - admin/librarian only
+router.get('/', auth, isLibrarianOrAdmin, PaymentController.getAllPayments);
+// Get payment by ID
+router.get('/:id', auth, PaymentController.getPaymentById);
+// Get user's payments
+router.get('/user/:userId', auth, PaymentController.getUserPayments);
+// Create payment - admin/librarian only
+router.post('/', auth, isLibrarianOrAdmin, PaymentController.createPayment);
+module.exports = router;
+// src/routes/reports.js
+const express = require('express');
+const router = express.Router();
+const ReportController = require('../controllers/reportController');
+const { auth, isAdmin, isLibrarianOrAdmin } = require('../middleware/auth');
+// All report routes require authentication
+router.use(auth);
+// Get all reports - admin/librarian only
+router.get('/', isLibrarianOrAdmin, ReportController.getAllReports);
+// Get report by ID - admin/librarian only
+router.get('/:id', isLibrarianOrAdmin, ReportController.getReportById);
+// Generate book inventory report - admin/librarian only
+router.post('/book-inventory', isLibrarianOrAdmin, ReportController.generateBookInventoryReport);
+// Generate user activity report - admin/librarian only
+router.post('/user-activity', isLibrarianOrAdmin, ReportController.generateUserActivityReport);
+// Generate fine collection report - admin/librarian only
+router.post('/fine-collection', isLibrarianOrAdmin, ReportController.generateFineCollectionReport);
+// Generate book circulation report - admin/librarian only
+router.post('/book-circulation', isLibrarianOrAdmin, ReportController.generateBookCirculationReport);
+// Delete report - admin only
+router.delete('/:id', isAdmin, ReportController.deleteReport);
+module.exports = router;
+// src/routes/reservations.js
+const express = require('express');
+const router = express.Router();
+const ReservationController = require('../controllers/reservationController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all reservations - admin/librarian only
+router.get('/', auth, isLibrarianOrAdmin, ReservationController.getAllReservations);
+// Get reservation by ID
+router.get('/:id', auth, ReservationController.getReservationById);
+// Get user's reservations
+router.get('/user/:userId', auth, ReservationController.getUserReservations);
+// Create reservation
+router.post('/', auth, ReservationController.createReservation);
+// Update reservation status
+router.put('/:id/status', auth, ReservationController.updateReservationStatus);
+// Cancel reservation
+router.put('/:id/cancel', auth, ReservationController.cancelReservation);
+module.exports = router;
+// src/routes/transactions.js
+const express = require('express');
+const router = express.Router();
+const TransactionController = require('../controllers/transactionController');
+const { auth, isLibrarianOrAdmin } = require('../middleware/auth');
+// Get all transactions - librarian/admin only
+router.get('/', auth, isLibrarianOrAdmin, TransactionController.getAllTransactions);
+// Get transaction by ID - auth required
+router.get('/:id', auth, TransactionController.getTransactionById);
+// Get user's transactions - auth required
+router.get('/user/:userId', auth, TransactionController.getUserTransactions);
+// Get current user's transactions - auth required
+router.get('/my/transactions', auth, (req, res) => {
+  req.params.userId = req.user.UserID;
+  TransactionController.getUserTransactions(req, res);
+});
+// Borrow a book - auth required
+router.post('/borrow', auth, TransactionController.borrowBook);
+// Return a book - auth required
+router.post('/return/:transactionId', auth, TransactionController.returnBook);
+// Update transaction status - librarian/admin only
+router.put('/:transactionId', auth, isLibrarianOrAdmin, TransactionController.updateTransactionStatus);
+module.exports = router;
+// src/routes/users.js
+const express = require('express');
+const router = express.Router();
+const UserController = require('../controllers/userController');
+const { auth, isAdmin } = require('../middleware/auth');
+// Get all users - admin only
+router.get('/', auth, isAdmin, UserController.getAllUsers);
+// Get user by ID - auth required
+router.get('/:id', auth, UserController.getUserById);
+// Update user - auth required
+router.put('/:id', auth, UserController.updateUser);
+// Delete user - admin only
+router.delete('/:id', auth, isAdmin, UserController.deleteUser);
+module.exports = router;

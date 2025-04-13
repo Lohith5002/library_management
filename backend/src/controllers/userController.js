@@ -85,6 +85,10 @@ const UserController = {
       res.status(500).json({ message: 'Error deleting user' });
     }
   }
+  
 };
+
+
+
 
 module.exports = UserController;

@@ -1,0 +1,1068 @@
+// src/models/user.js
+const { pool } = require('../config/db');
+const bcrypt = require('bcrypt');
+
+const UserModel = {
+  // Get all users
+  getAll: async () => {
+    const [rows] = await pool.query('SELECT UserID, Name, Email, Role, CreatedAt, UpdatedAt FROM users');
+    return rows;
+  },
+
+  // Get user by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      'SELECT UserID, Name, Email, Role, CreatedAt, UpdatedAt FROM users WHERE UserID = ?',
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Get user by email
+  getByEmail: async (email) => {
+    const [rows] = await pool.query('SELECT * FROM users WHERE Email = ?', [email]);
+    return rows[0];
+  },
+
+  // Create new user
+  create: async (userData) => {
+    const { name, email, password, role = 'Student' } = userData;
+    
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    
+    const [result] = await pool.query(
+      'INSERT INTO users (Name, Email, Password, Role) VALUES (?, ?, ?, ?)',
+      [name, email, hashedPassword, role]
+    );
+    
+    return result.insertId;
+  },
+
+  // Update user
+  update: async (id, userData) => {
+    const { name, email, role } = userData;
+    
+    const [result] = await pool.query(
+      'UPDATE users SET Name = ?, Email = ?, Role = ? WHERE UserID = ?',
+      [name, email, role, id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+
+  // Update user password
+  updatePassword: async (id, password) => {
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    
+    const [result] = await pool.query(
+      'UPDATE users SET Password = ? WHERE UserID = ?',
+      [hashedPassword, id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+
+  // Delete user
+  delete: async (id) => {
+    const [result] = await pool.query('DELETE FROM users WHERE UserID = ?', [id]);
+    return result.affectedRows > 0;
+  }
+};
+
+module.exports = UserModel;
+
+// src/models/transaction.js
+const { pool } = require('../config/db');
+
+// Helper function to calculate fine amount
+const calculateFine = (dueDate, returnDate) => {
+  // Default fine rate: $0.50 per day
+  const fineRatePerDay = 0.5;
+  const dueDateTime = new Date(dueDate);
+  const returnDateTime = returnDate ? new Date(returnDate) : new Date();
+  
+  // No fine if returned on time
+  if (returnDateTime <= dueDateTime) {
+    return 0;
+  }
+  
+  // Calculate days overdue
+  const daysOverdue = Math.ceil((returnDateTime - dueDateTime) / (1000 * 60 * 60 * 24));
+  return daysOverdue * fineRatePerDay;
+};
+
+const TransactionModel = {
+  // Get all transactions
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT t.*, b.Title as BookTitle, u.Name as UserName
+      FROM transactions t
+      JOIN books b ON t.BookID = b.BookID
+      JOIN users u ON t.UserID = u.UserID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.userId) {
+      query += ' AND t.UserID = ?';
+      queryParams.push(filters.userId);
+    }
+    
+    if (filters.bookId) {
+      query += ' AND t.BookID = ?';
+      queryParams.push(filters.bookId);
+    }
+    
+    if (filters.status) {
+      query += ' AND t.Status = ?';
+      queryParams.push(filters.status);
+    }
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get transaction by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT t.*, b.Title as BookTitle, u.Name as UserName
+       FROM transactions t
+       JOIN books b ON t.BookID = b.BookID
+       JOIN users u ON t.UserID = u.UserID
+       WHERE t.TransactionID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Get user's active transactions
+  getUserActiveTransactions: async (userId) => {
+    const [rows] = await pool.query(
+      `SELECT t.*, b.Title as BookTitle
+       FROM transactions t
+       JOIN books b ON t.BookID = b.BookID
+       WHERE t.UserID = ? AND t.Status != 'Returned'`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Check if book is available for borrowing
+  isBookAvailable: async (bookId) => {
+    const [rows] = await pool.query(
+      'SELECT AvailableCopies FROM books WHERE BookID = ?',
+      [bookId]
+    );
+    
+    return rows[0] && rows[0].AvailableCopies > 0;
+  },
+
+  // Create new transaction (borrow book)
+  borrowBook: async (userId, bookId, dueDate) => {
+    // Start a transaction
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      
+      // Insert transaction record
+      const [result] = await connection.query(
+        `INSERT INTO transactions (UserID, BookID, DueDate)
+         VALUES (?, ?, ?)`,
+        [userId, bookId, dueDate]
+      );
+      
+      // Update book availability
+      await connection.query(
+        `UPDATE books SET AvailableCopies = AvailableCopies - 1,
+         Availability = (AvailableCopies - 1 > 0)
+         WHERE BookID = ?`,
+        [bookId]
+      );
+      
+      await connection.commit();
+      return result.insertId;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Return book
+  returnBook: async (transactionId) => {
+    // Start a transaction
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      
+      // Get transaction details
+      const [transactionRows] = await connection.query(
+        'SELECT * FROM transactions WHERE TransactionID = ?',
+        [transactionId]
+      );
+      
+      if (transactionRows.length === 0) {
+        throw new Error('Transaction not found');
+      }
+      
+      const transaction = transactionRows[0];
+      
+      if (transaction.Status === 'Returned') {
+        throw new Error('Book already returned');
+      }
+      
+      const returnDate = new Date();
+      const fineAmount = calculateFine(transaction.DueDate, returnDate);
+      const status = returnDate > new Date(transaction.DueDate) ? 'Overdue' : 'Returned';
+      
+      // Update transaction
+      await connection.query(
+        `UPDATE transactions 
+         SET ReturnDate = ?, Status = ?, FineAmount = ?
+         WHERE TransactionID = ?`,
+        [returnDate, status, fineAmount, transactionId]
+      );
+      
+      // Update book availability
+      await connection.query(
+        `UPDATE books 
+         SET AvailableCopies = AvailableCopies + 1, Availability = true
+         WHERE BookID = ?`,
+        [transaction.BookID]
+      );
+      
+      // Create fine record if needed
+      if (fineAmount > 0) {
+        await connection.query(
+          `INSERT INTO fines (UserID, TransactionID, Amount)
+           VALUES (?, ?, ?)`,
+          [transaction.UserID, transactionId, fineAmount]
+        );
+      }
+      
+      await connection.commit();
+      return { status, fineAmount };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Update transaction status
+  updateStatus: async (id, status) => {
+    const [result] = await pool.query(
+      'UPDATE transactions SET Status = ? WHERE TransactionID = ?',
+      [status, id]
+    );
+    return result.affectedRows > 0;
+  }
+};
+
+module.exports = TransactionModel;
+
+// src/models/reservation.js
+const { pool } = require('../config/db');
+
+const ReservationModel = {
+  // Get all reservations
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT r.*, b.Title as BookTitle, u.Name as UserName
+      FROM reservations r
+      JOIN books b ON r.BookID = b.BookID
+      JOIN users u ON r.UserID = u.UserID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.userId) {
+      query += ' AND r.UserID = ?';
+      queryParams.push(filters.userId);
+    }
+    
+    if (filters.bookId) {
+      query += ' AND r.BookID = ?';
+      queryParams.push(filters.bookId);
+    }
+    
+    if (filters.status) {
+      query += ' AND r.Status = ?';
+      queryParams.push(filters.status);
+    }
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get reservation by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT r.*, b.Title as BookTitle, u.Name as UserName
+       FROM reservations r
+       JOIN books b ON r.BookID = b.BookID
+       JOIN users u ON r.UserID = u.UserID
+       WHERE r.ReservationID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Get user's reservations
+  getUserReservations: async (userId) => {
+    const [rows] = await pool.query(
+      `SELECT r.*, b.Title as BookTitle
+       FROM reservations r
+       JOIN books b ON r.BookID = b.BookID
+       WHERE r.UserID = ?`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Create reservation
+  create: async (userId, bookId, expiryDays = 7) => {
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + expiryDays);
+    
+    const [result] = await pool.query(
+      `INSERT INTO reservations (UserID, BookID, ExpiryDate)
+       VALUES (?, ?, ?)`,
+      [userId, bookId, expiryDate]
+    );
+    
+    return result.insertId;
+  },
+
+  // Update reservation status
+  updateStatus: async (id, status) => {
+    const validStatuses = ['Pending', 'Fulfilled', 'Cancelled', 'Expired'];
+    
+    if (!validStatuses.includes(status)) {
+      throw new Error('Invalid status');
+    }
+    
+    const [result] = await pool.query(
+      'UPDATE reservations SET Status = ? WHERE ReservationID = ?',
+      [status, id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+  isBookReservedByUser: async (userId, bookId) => {
+    const [rows] = await pool.query(
+      'SELECT * FROM reservations WHERE UserID = ? AND BookID = ? AND Status = "Pending"',
+      [userId, bookId]
+    );
+    return rows.length > 0;
+  },
+
+  // Check for expired reservations
+  checkExpiredReservations: async () => {
+    const [result] = await pool.query(
+      `UPDATE reservations 
+       SET Status = 'Expired'
+       WHERE Status = 'Pending' AND ExpiryDate < NOW()`
+    );
+    
+    return result.affectedRows;
+  }
+};
+
+module.exports = ReservationModel;
+
+// src/models/report.js
+const { pool } = require('../config/db');
+
+const ReportModel = {
+  // Get all reports
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT r.*, u.Name as AdminName
+      FROM reports r
+      JOIN users u ON r.AdminID = u.UserID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.reportType) {
+      query += ' AND r.ReportType = ?';
+      queryParams.push(filters.reportType);
+    }
+    
+    if (filters.adminId) {
+      query += ' AND r.AdminID = ?';
+      queryParams.push(filters.adminId);
+    }
+    
+    if (filters.startDate && filters.endDate) {
+      query += ' AND r.GeneratedDate BETWEEN ? AND ?';
+      queryParams.push(filters.startDate, filters.endDate);
+    }
+    
+    // Order by most recent first
+    query += ' ORDER BY r.GeneratedDate DESC';
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get report by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT r.*, u.Name as AdminName
+       FROM reports r
+       JOIN users u ON r.AdminID = u.UserID
+       WHERE r.ReportID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Create new report
+  create: async (reportData) => {
+    const { reportType, adminId, reportData: data } = reportData;
+    
+    const [result] = await pool.query(
+      `INSERT INTO reports (ReportType, AdminID, ReportData)
+       VALUES (?, ?, ?)`,
+      [reportType, adminId, JSON.stringify(data)]
+    );
+    
+    return result.insertId;
+  },
+
+  // Update report
+  update: async (id, reportData) => {
+    const { reportData: data } = reportData;
+    
+    const [result] = await pool.query(
+      `UPDATE reports SET ReportData = ?, UpdatedAt = CURRENT_TIMESTAMP
+       WHERE ReportID = ?`,
+      [JSON.stringify(data), id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+
+  // Delete report
+  delete: async (id) => {
+    const [result] = await pool.query('DELETE FROM reports WHERE ReportID = ?', [id]);
+    return result.affectedRows > 0;
+  },
+
+  // Generate book inventory report
+  generateBookInventoryReport: async () => {
+    const [books] = await pool.query(`
+      SELECT b.*, c.CategoryName,
+             (b.TotalCopies - b.AvailableCopies) as CheckedOutCopies
+      FROM books b
+      LEFT JOIN categories c ON b.CategoryID = c.CategoryID
+      ORDER BY b.Title
+    `);
+    
+    // Get category statistics
+    const [categoryStats] = await pool.query(`
+      SELECT c.CategoryName, 
+             COUNT(b.BookID) as TotalBooks,
+             SUM(b.TotalCopies) as TotalCopies,
+             SUM(b.AvailableCopies) as AvailableCopies
+      FROM categories c
+      LEFT JOIN books b ON c.CategoryID = b.CategoryID
+      GROUP BY c.CategoryID
+      ORDER BY c.CategoryName
+    `);
+    
+    // Get overall statistics
+    const [overallStats] = await pool.query(`
+      SELECT COUNT(*) as TotalBooks,
+             SUM(TotalCopies) as TotalCopies,
+             SUM(AvailableCopies) as AvailableCopies,
+             SUM(TotalCopies - AvailableCopies) as CheckedOutCopies
+      FROM books
+    `);
+    
+    return {
+      books,
+      categoryStats,
+      overallStats: overallStats[0],
+      generatedAt: new Date()
+    };
+  },
+
+  // Generate user activity report
+  generateUserActivityReport: async (startDate, endDate) => {
+    const dateFilter = startDate && endDate 
+      ? `AND (t.BorrowDate BETWEEN ? AND ? OR t.ReturnDate BETWEEN ? AND ?)`
+      : '';
+    
+    const params = startDate && endDate 
+      ? [startDate, endDate, startDate, endDate]
+      : [];
+    
+    // Get transactions data
+    const [transactions] = await pool.query(`
+      SELECT t.*, b.Title as BookTitle, u.Name as UserName, u.Role as UserRole
+      FROM transactions t
+      JOIN books b ON t.BookID = b.BookID
+      JOIN users u ON t.UserID = u.UserID
+      WHERE 1=1 ${dateFilter}
+      ORDER BY t.BorrowDate DESC
+    `, params);
+    
+    // Get top active users
+    const [activeUsers] = await pool.query(`
+      SELECT u.UserID, u.Name, u.Role, COUNT(t.TransactionID) as TransactionCount
+      FROM users u
+      LEFT JOIN transactions t ON u.UserID = t.UserID
+      ${startDate && endDate ? `WHERE (t.BorrowDate BETWEEN ? AND ? OR t.ReturnDate BETWEEN ? AND ?)` : ''}
+      GROUP BY u.UserID
+      ORDER BY TransactionCount DESC
+      LIMIT 10
+    `, params);
+    
+    // Get most borrowed books
+    const [popularBooks] = await pool.query(`
+      SELECT b.BookID, b.Title, b.Author, COUNT(t.TransactionID) as BorrowCount
+      FROM books b
+      LEFT JOIN transactions t ON b.BookID = t.BookID
+      ${startDate && endDate ? `WHERE (t.BorrowDate BETWEEN ? AND ? OR t.ReturnDate BETWEEN ? AND ?)` : ''}
+      GROUP BY b.BookID
+      ORDER BY BorrowCount DESC
+      LIMIT 10
+    `, params);
+    
+    return {
+      transactions,
+      activeUsers,
+      popularBooks,
+      period: { startDate, endDate },
+      generatedAt: new Date()
+    };
+  },
+
+  // Generate fine collection report
+  generateFineCollectionReport: async (startDate, endDate) => {
+    const dateFilter = startDate && endDate 
+      ? `WHERE p.PaymentDate BETWEEN ? AND ?`
+      : '';
+    
+    const params = startDate && endDate 
+      ? [startDate, endDate]
+      : [];
+    
+    // Get fine payments
+    const [payments] = await pool.query(`
+      SELECT p.*, u.Name as UserName, t.TransactionID,
+             b.Title as BookTitle
+      FROM payments p
+      JOIN users u ON p.UserID = u.UserID
+      LEFT JOIN transactions t ON p.TransactionID = t.TransactionID
+      LEFT JOIN books b ON t.BookID = b.BookID
+      ${dateFilter}
+      ORDER BY p.PaymentDate DESC
+    `, params);
+    
+    // Get summary statistics
+    const [summary] = await pool.query(`
+      SELECT COUNT(*) as TotalPayments,
+             SUM(AmountPaid) as TotalCollected,
+             AVG(AmountPaid) as AveragePayment,
+             MAX(AmountPaid) as LargestPayment
+      FROM payments
+      ${dateFilter}
+    `, params);
+    
+    // Get payment method breakdown
+    const [paymentMethods] = await pool.query(`
+      SELECT PaymentMethod, COUNT(*) as Count, SUM(AmountPaid) as TotalAmount
+      FROM payments
+      ${dateFilter}
+      GROUP BY PaymentMethod
+    `, params);
+    
+    // Get pending fines data
+    const [pendingFines] = await pool.query(`
+      SELECT f.*, u.Name as UserName, t.TransactionID,
+             b.Title as BookTitle
+      FROM fines f
+      JOIN users u ON f.UserID = u.UserID
+      JOIN transactions t ON f.TransactionID = t.TransactionID
+      JOIN books b ON t.BookID = b.BookID
+      WHERE f.Status = 'Unpaid'
+      ORDER BY f.Amount DESC
+    `);
+    
+    return {
+      payments,
+      summary: summary[0],
+      paymentMethods,
+      pendingFines,
+      period: { startDate, endDate },
+      generatedAt: new Date()
+    };
+  },
+
+  // Generate book circulation report
+  generateBookCirculationReport: async (startDate, endDate) => {
+    const dateFilter = startDate && endDate 
+      ? `WHERE t.BorrowDate BETWEEN ? AND ?`
+      : '';
+    
+    const params = startDate && endDate 
+      ? [startDate, endDate]
+      : [];
+    
+    // Get circulation by day
+    const [dailyCirculation] = await pool.query(`
+      SELECT DATE(t.BorrowDate) as Date, COUNT(*) as CheckoutCount
+      FROM transactions t
+      ${dateFilter}
+      GROUP BY DATE(t.BorrowDate)
+      ORDER BY Date
+    `, params);
+    
+    // Get circulation by category
+    const [categoryCirculation] = await pool.query(`
+      SELECT c.CategoryName, COUNT(t.TransactionID) as CheckoutCount
+      FROM categories c
+      LEFT JOIN books b ON c.CategoryID = b.CategoryID
+      LEFT JOIN transactions t ON b.BookID = t.BookID
+      ${dateFilter ? `AND ${dateFilter.substring(6)}` : ''}
+      GROUP BY c.CategoryID
+      ORDER BY CheckoutCount DESC
+    `, params);
+    
+    // Get average checkout duration
+    const [avgDuration] = await pool.query(`
+      SELECT AVG(DATEDIFF(IFNULL(t.ReturnDate, CURRENT_TIMESTAMP), t.BorrowDate)) as AvgDays
+      FROM transactions t
+      ${dateFilter}
+    `, params);
+    
+    // Get overdue books statistics
+    const [overdueStats] = await pool.query(`
+      SELECT COUNT(*) as OverdueCount,
+             AVG(DATEDIFF(CURRENT_TIMESTAMP, t.DueDate)) as AvgDaysOverdue
+      FROM transactions t
+      WHERE t.Status = 'Overdue' OR (t.DueDate < CURRENT_TIMESTAMP AND t.ReturnDate IS NULL)
+      ${startDate && endDate ? `AND t.BorrowDate BETWEEN ? AND ?` : ''}
+    `, params);
+    
+    return {
+      dailyCirculation,
+      categoryCirculation,
+      avgDuration: avgDuration[0],
+      overdueStats: overdueStats[0],
+      period: { startDate, endDate },
+      generatedAt: new Date()
+    };
+  }
+};
+
+module.exports = ReportModel;
+
+// src/models/payment.js
+const { pool } = require('../config/db');
+
+const PaymentModel = {
+  // Get all payments
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT p.*, u.Name as UserName, 
+             t.TransactionID, t.BookID, b.Title as BookTitle
+      FROM payments p
+      JOIN users u ON p.UserID = u.UserID
+      LEFT JOIN transactions t ON p.TransactionID = t.TransactionID
+      LEFT JOIN books b ON t.BookID = b.BookID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.userId) {
+      query += ' AND p.UserID = ?';
+      queryParams.push(filters.userId);
+    }
+    
+    if (filters.paymentMethod) {
+      query += ' AND p.PaymentMethod = ?';
+      queryParams.push(filters.paymentMethod);
+    }
+    
+    if (filters.startDate) {
+      query += ' AND p.PaymentDate >= ?';
+      queryParams.push(filters.startDate);
+    }
+    
+    if (filters.endDate) {
+      query += ' AND p.PaymentDate <= ?';
+      queryParams.push(filters.endDate);
+    }
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get payment by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT p.*, u.Name as UserName, 
+              t.TransactionID, t.BookID, b.Title as BookTitle
+       FROM payments p
+       JOIN users u ON p.UserID = u.UserID
+       LEFT JOIN transactions t ON p.TransactionID = t.TransactionID
+       LEFT JOIN books b ON t.BookID = b.BookID
+       WHERE p.PaymentID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Get user payments
+  getUserPayments: async (userId) => {
+    const [rows] = await pool.query(
+      `SELECT p.*, t.BookID, b.Title as BookTitle
+       FROM payments p
+       LEFT JOIN transactions t ON p.TransactionID = t.TransactionID
+       LEFT JOIN books b ON t.BookID = b.BookID
+       WHERE p.UserID = ?`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Create payment
+  create: async (paymentData) => {
+    const {
+      userId,
+      transactionId,
+      amountPaid,
+      paymentMethod
+    } = paymentData;
+    
+    const [result] = await pool.query(
+      `INSERT INTO payments (UserID, TransactionID, AmountPaid, PaymentMethod)
+       VALUES (?, ?, ?, ?)`,
+      [userId, transactionId, amountPaid, paymentMethod]
+    );
+    
+    return result.insertId;
+  }
+};
+
+module.exports = PaymentModel;
+
+// src/models/fine.js
+const { pool } = require('../config/db');
+
+const FineModel = {
+  // Get all fines
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT f.*, t.BorrowDate, t.DueDate, t.ReturnDate, 
+             b.Title as BookTitle, u.Name as UserName
+      FROM fines f
+      JOIN transactions t ON f.TransactionID = t.TransactionID
+      JOIN users u ON f.UserID = u.UserID
+      JOIN books b ON t.BookID = b.BookID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.userId) {
+      query += ' AND f.UserID = ?';
+      queryParams.push(filters.userId);
+    }
+    
+    if (filters.status) {
+      query += ' AND f.Status = ?';
+      queryParams.push(filters.status);
+    }
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get fine by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT f.*, t.BorrowDate, t.DueDate, t.ReturnDate, 
+              b.Title as BookTitle, u.Name as UserName
+       FROM fines f
+       JOIN transactions t ON f.TransactionID = t.TransactionID
+       JOIN users u ON f.UserID = u.UserID
+       JOIN books b ON t.BookID = b.BookID
+       WHERE f.FineID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Get user's fines
+  getUserFines: async (userId) => {
+    const [rows] = await pool.query(
+      `SELECT f.*, t.BorrowDate, t.DueDate, t.ReturnDate, b.Title as BookTitle
+       FROM fines f
+       JOIN transactions t ON f.TransactionID = t.TransactionID
+       JOIN books b ON t.BookID = b.BookID
+       WHERE f.UserID = ?`,
+      [userId]
+    );
+    return rows;
+  },
+
+  // Pay fine
+  payFine: async (fineId, paymentMethod) => {
+    // Start a transaction
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      
+      // Get fine details
+      const [fineRows] = await connection.query(
+        'SELECT * FROM fines WHERE FineID = ?',
+        [fineId]
+      );
+      
+      if (fineRows.length === 0) {
+        throw new Error('Fine not found');
+      }
+      
+      const fine = fineRows[0];
+      
+      if (fine.Status === 'Paid') {
+        throw new Error('Fine already paid');
+      }
+      
+      // Update fine status
+      await connection.query(
+        'UPDATE fines SET Status = ? WHERE FineID = ?',
+        ['Paid', fineId]
+      );
+      
+      // Create payment record
+      await connection.query(
+        `INSERT INTO payments (UserID, TransactionID, AmountPaid, PaymentMethod)
+         VALUES (?, ?, ?, ?)`,
+        [fine.UserID, fine.TransactionID, fine.Amount, paymentMethod || 'Cash']
+      );
+      
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  },
+
+  // Update fine
+  updateFine: async (id, amount) => {
+    const [result] = await pool.query(
+      'UPDATE fines SET Amount = ? WHERE FineID = ? AND Status = ?',
+      [amount, id, 'Unpaid']
+    );
+    return result.affectedRows > 0;
+  }
+};
+
+module.exports = FineModel;
+
+// src/models/category.js
+const { pool } = require('../config/db');
+
+const CategoryModel = {
+  // Get all categories
+  getAll: async () => {
+    const [rows] = await pool.query('SELECT * FROM categories');
+    return rows;
+  },
+
+  // Get category by ID
+  getById: async (id) => {
+    const [rows] = await pool.query('SELECT * FROM categories WHERE CategoryID = ?', [id]);
+    return rows[0];
+  },
+
+  // Create new category
+  create: async (categoryData) => {
+    const { categoryName, description } = categoryData;
+    
+    const [result] = await pool.query(
+      'INSERT INTO categories (CategoryName, Description) VALUES (?, ?)',
+      [categoryName, description]
+    );
+    
+    return result.insertId;
+  },
+
+  // Update category
+  update: async (id, categoryData) => {
+    const { categoryName, description } = categoryData;
+    
+    const [result] = await pool.query(
+      'UPDATE categories SET CategoryName = ?, Description = ? WHERE CategoryID = ?',
+      [categoryName, description, id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+
+  // Delete category
+  delete: async (id) => {
+    const [result] = await pool.query('DELETE FROM categories WHERE CategoryID = ?', [id]);
+    return result.affectedRows > 0;
+  },
+
+  // Get books by category
+  getBooks: async (id) => {
+    const [rows] = await pool.query(
+      'SELECT * FROM books WHERE CategoryID = ?',
+      [id]
+    );
+    return rows;
+  }
+};
+
+module.exports = CategoryModel;
+
+// src/models/book.js
+const { pool } = require('../config/db');
+
+const BookModel = {
+  // Get all books
+  getAll: async (filters = {}) => {
+    let query = `
+      SELECT b.*, c.CategoryName 
+      FROM books b
+      LEFT JOIN categories c ON b.CategoryID = c.CategoryID
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    
+    // Apply filters
+    if (filters.title) {
+      query += ' AND b.Title LIKE ?';
+      queryParams.push(`%${filters.title}%`);
+    }
+    
+    if (filters.author) {
+      query += ' AND b.Author LIKE ?';
+      queryParams.push(`%${filters.author}%`);
+    }
+    
+    if (filters.category) {
+      query += ' AND b.CategoryID = ?';
+      queryParams.push(filters.category);
+    }
+    
+    if (filters.available) {
+      query += ' AND b.AvailableCopies > 0';
+    }
+    
+    const [rows] = await pool.query(query, queryParams);
+    return rows;
+  },
+
+  // Get book by ID
+  getById: async (id) => {
+    const [rows] = await pool.query(
+      `SELECT b.*, c.CategoryName 
+       FROM books b
+       LEFT JOIN categories c ON b.CategoryID = c.CategoryID
+       WHERE b.BookID = ?`,
+      [id]
+    );
+    return rows[0];
+  },
+
+  // Create new book
+  create: async (bookData) => {
+    const {
+      title,
+      author,
+      isbn,
+      publicationYear,
+      publisher,
+      totalCopies,
+      categoryId
+    } = bookData;
+    
+    const [result] = await pool.query(
+      `INSERT INTO books 
+       (Title, Author, ISBN, PublicationYear, Publisher, TotalCopies, AvailableCopies, CategoryID)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, author, isbn, publicationYear, publisher, totalCopies, totalCopies, categoryId]
+    );
+    
+    return result.insertId;
+  },
+
+  // Update book
+  update: async (id, bookData) => {
+    const {
+      title,
+      author,
+      isbn,
+      publicationYear,
+      publisher,
+      totalCopies,
+      availableCopies,
+      categoryId
+    } = bookData;
+    
+    const [result] = await pool.query(
+      `UPDATE books 
+       SET Title = ?, Author = ?, ISBN = ?, PublicationYear = ?,
+           Publisher = ?, TotalCopies = ?, AvailableCopies = ?, CategoryID = ?
+       WHERE BookID = ?`,
+      [title, author, isbn, publicationYear, publisher, totalCopies, availableCopies, categoryId, id]
+    );
+    
+    return result.affectedRows > 0;
+  },
+
+  // Delete book
+  delete: async (id) => {
+    const [result] = await pool.query('DELETE FROM books WHERE BookID = ?', [id]);
+    return result.affectedRows > 0;
+  },
+
+  // Update book availability
+  updateAvailability: async (id, isCheckout) => {
+    let query;
+    
+    if (isCheckout) {
+      query = `UPDATE books SET AvailableCopies = AvailableCopies - 1, 
+               Availability = (AvailableCopies - 1 > 0)
+               WHERE BookID = ? AND AvailableCopies > 0`;
+    } else {
+      query = `UPDATE books SET AvailableCopies = AvailableCopies + 1,
+               Availability = true
+               WHERE BookID = ? AND AvailableCopies < TotalCopies`;
+    }
+    
+    const [result] = await pool.query(query, [id]);
+    return result.affectedRows > 0;
+  }
+};
+
+module.exports = BookModel;

@@ -1,42 +1,421 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+/* General Reset and Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  line-height: 1.6;
+  color: #333;
+  padding: 20px;
+  background-color: #f9f9f9;
+}
+
+/* Navbar Styles */
+.navbar {
+  display: flex;
+  gap: 20px;
+  padding: 10px 20px;
+  background-color: #fff;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 20px;
+}
+
+.navbar a,
+.navbar button {
+  text-decoration: none;
+  color: #007bff;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s;
+}
+
+.navbar a:hover,
+.navbar button:hover {
+  background-color: #e9ecef;
+  border-radius: 4px;
+}
+
+/* Home Page Styles */
+.home {
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.home h1 {
+  font-size: 2.5rem;
+  margin-bottom: 20px;
+  color: #2c3e50;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.home p {
+  font-size: 1.2rem;
+  margin-bottom: 20px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+.home a {
+  color: #007bff;
+  text-decoration: none;
+  margin: 0 10px;
 }
 
-.card {
-  padding: 2em;
+.home a:hover {
+  text-decoration: underline;
 }
 
-.read-the-docs {
-  color: #888;
+/* Books Page Styles */
+.books-page h1 {
+  font-size: 2rem;
+  margin-bottom: 20px;
+  color: #2c3e50;
+}
+
+/* Login/Register Page and Component Styles */
+.login-page,
+.register-page,
+.login,
+.register {
+  max-width: 400px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.login-page h2,
+.register-page h2 {
+  font-size: 1.8rem;
+  margin-bottom: 20px;
+  text-align: center;
+  color: #2c3e50;
+}
+
+.login form,
+.register form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.login input,
+.register input,
+.login select,
+.register select {
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  outline: none;
+}
+
+.login input:focus,
+.register input:focus,
+.login select:focus,
+.register select:focus {
+  border-color: #007bff;
+  box-shadow: 0 0 5px rgba(0, 123, 255, 0.3);
+}
+
+.login button,
+.register button {
+  padding: 10px;
+  font-size: 16px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.login button:hover,
+.register button:hover {
+  background-color: #0056b3;
+}
+
+/* Error Message Styles */
+.error {
+  color: #dc3545;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+/* Book Components */
+.book-list,
+.book-form,
+.book-details {
+  margin-bottom: 40px;
+}
+
+.book-list h2,
+.book-form h3,
+.book-details h3 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.book-list .filters {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.book-list .filters input {
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.book-list .filters label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.book-list ul,
+.category-list ul,
+.transaction-list ul,
+.reservation-list ul,
+.fine-list ul,
+.payment-list ul,
+.report-list ul {
+  list-style: none;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.book-list li,
+.category-list li,
+.transaction-list li,
+.reservation-list li,
+.fine-list li,
+.payment-list li,
+.report-list li {
+  padding: 15px;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.book-list li:last-child,
+.category-list li:last-child,
+.transaction-list li:last-child,
+.reservation-list li:last-child,
+.fine-list li:last-child,
+.payment-list li:last-child,
+.report-list li:last-child {
+  border-bottom: none;
+}
+
+.book-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-width: 500px;
+}
+
+.book-form input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.book-form button {
+  padding: 10px;
+  background-color: #28a745;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.book-form button:hover {
+  background-color: #218838;
+}
+
+.book-details p {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+/* Category Components */
+.category-list h2,
+.category-form h3 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.category-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-width: 400px;
+}
+
+.category-form input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.category-form button {
+  padding: 10px;
+  background-color: #28a745;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.category-form button:hover {
+  background-color: #218838;
+}
+
+/* Dashboard Styles */
+.user-dashboard,
+.librarian-dashboard,
+.admin-dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.user-dashboard h1,
+.librarian-dashboard h1,
+.admin-dashboard h1 {
+  font-size: 2rem;
+  margin-bottom: 30px;
+  color: #2c3e50;
+  text-align: center;
+}
+
+.user-dashboard h2,
+.librarian-dashboard h2,
+.admin-dashboard h2 {
+  font-size: 1.5rem;
+  margin: 20px 0 15px;
+  color: #2c3e50;
+}
+
+/* Transaction Components */
+.transaction-list h2,
+.borrow-form h3 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.borrow-form form {
+  display: flex;
+  gap: 15px;
+  max-width: 300px;
+}
+
+.borrow-form input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  flex: 1;
+}
+
+.borrow-form button {
+  padding: 10px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.borrow-form button:hover {
+  background-color: #0056b3;
+}
+
+/* Reservation Components */
+.reservation-list h2,
+.reservation-form h3 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.reservation-form form {
+  display: flex;
+  gap: 15px;
+  max-width: 300px;
+}
+
+.reservation-form input {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  flex: 1;
+}
+
+.reservation-form button,
+.reservation-list button {
+  padding: 10px;
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.reservation-form button:hover,
+.reservation-list button:hover {
+  background-color: #0056b3;
+}
+
+/* Fine Component */
+.fine-list h2 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.fine-list button {
+  padding: 8px 12px;
+  background-color: #dc3545;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.fine-list button:hover {
+  background-color: #c82333;
+}
+
+/* Payment Component */
+.payment-list h2 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+/* Report Component */
+.report-list h2 {
+  font-size: 1.5rem;
+  margin-bottom: 15px;
+  color: #2c3e50;
 }

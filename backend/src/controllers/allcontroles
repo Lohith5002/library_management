@@ -1,0 +1,1237 @@
+// src/controllers/userController.js
+const UserModel = require('../models/user');
+
+const UserController = {
+  // Get all users
+  getAllUsers: async (req, res) => {
+    try {
+      const users = await UserModel.getAll();
+      res.json({ users });
+    } catch (error) {
+      console.error('Error getting users:', error);
+      res.status(500).json({ message: 'Error fetching users' });
+    }
+  },
+
+  // Get user by ID
+  getUserById: async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const user = await UserModel.getById(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      res.json({ user });
+    } catch (error) {
+      console.error('Error getting user:', error);
+      res.status(500).json({ message: 'Error fetching user' });
+    }
+  },
+
+  // Update user
+  updateUser: async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const { name, email, role } = req.body;
+      
+      // Check if user exists
+      const user = await UserModel.getById(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      // Check if user is updating their own data or is an admin
+      if (req.user.UserID !== parseInt(userId) && req.user.Role !== 'Admin') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      const updated = await UserModel.update(userId, { name, email, role });
+      
+      if (!updated) {
+        return res.status(400).json({ message: 'Failed to update user' });
+      }
+      
+      res.json({ message: 'User updated successfully' });
+    } catch (error) {
+      console.error('Error updating user:', error);
+      res.status(500).json({ message: 'Error updating user' });
+    }
+  },
+
+  // Delete user
+  deleteUser: async (req, res) => {
+    try {
+      const userId = req.params.id;
+      
+      // Check if user exists
+      const user = await UserModel.getById(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      
+      const deleted = await UserModel.delete(userId);
+      
+      if (!deleted) {
+        return res.status(400).json({ message: 'Failed to delete user' });
+      }
+      
+      res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      res.status(500).json({ message: 'Error deleting user' });
+    }
+  }
+  
+};
+
+
+
+
+module.exports = UserController;
+
+// src/controllers/transactionController.js
+const TransactionModel = require('../models/transaction');
+const BookModel = require('../models/book');
+const { pool } = require('../config/db');
+
+const TransactionController = {
+  // Get all transactions
+  getAllTransactions: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { userId, bookId, status } = req.query;
+      const filters = { userId, bookId, status };
+      
+      const transactions = await TransactionModel.getAll(filters);
+      res.json({ transactions });
+    } catch (error) {
+      console.error('Error getting transactions:', error);
+      res.status(500).json({ message: 'Error fetching transactions' });
+    }
+  },
+
+  // Get transaction by ID
+  getTransactionById: async (req, res) => {
+    try {
+      const transactionId = req.params.id;
+      const transaction = await TransactionModel.getById(transactionId);
+      
+      if (!transaction) {
+        return res.status(404).json({ message: 'Transaction not found' });
+      }
+      
+      res.json({ transaction });
+    } catch (error) {
+      console.error('Error getting transaction:', error);
+      res.status(500).json({ message: 'Error fetching transaction' });
+    }
+  },
+
+  // Get user's active transactions
+  getUserTransactions: async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId || req.user.UserID);
+
+      
+      // Check if user is requesting their own transactions or is admin/librarian
+      if (req.user.UserID !== parseInt(userId) && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      const transactions = await TransactionModel.getUserActiveTransactions(userId);
+      res.json({ transactions });
+    } catch (error) {
+      console.error('Error getting user transactions:', error);
+      res.status(500).json({ message: 'Error fetching user transactions' });
+    }
+  },
+
+  // Borrow a book
+  borrowBook: async (req, res) => {
+    try {
+      const { bookId, userId, dueDate } = req.body;
+      const borrowerId = userId || req.user.UserID;
+      
+      // Check if user can borrow the book (librarian/admin can borrow for others)
+      if (borrowerId !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Check if book exists
+      const book = await BookModel.getById(bookId);
+      if (!book) {
+        return res.status(404).json({ message: 'Book not found' });
+      }
+      
+      // Check if book is available
+      if (book.AvailableCopies <= 0) {
+        return res.status(400).json({ message: 'Book is not available for borrowing' });
+      }
+      
+      // Set due date (default: 14 days from now)
+      const dueDateValue = dueDate ? new Date(dueDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      
+      // Borrow the book
+      const transactionId = await TransactionModel.borrowBook(borrowerId, bookId, dueDateValue);
+      
+      res.status(201).json({
+        message: 'Book borrowed successfully',
+        transactionId,
+        dueDate: dueDateValue
+      });
+    } catch (error) {
+      console.error('Error borrowing book:', error);
+      res.status(500).json({ message: 'Error borrowing book' });
+    }
+  },
+
+  // Return a book
+  // Return a book
+returnBook: async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+
+    // Get transaction details
+    const transaction = await TransactionModel.getById(transactionId);
+
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+
+    // Check if user can return the book
+    if (
+      transaction.UserID !== req.user.UserID &&
+      req.user.Role !== 'Admin' &&
+      req.user.Role !== 'Librarian'
+    ) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (transaction.Status === 'Returned') {
+      return res.status(400).json({ message: 'Book already returned' });
+    }
+
+    // Return the book and update copies
+    const result = await TransactionModel.returnBook(transactionId);
+
+    const bookId = transaction.BookID;
+    console.log("Auth user:", req.user);
+console.log("Transaction:", transaction);
+
+//    // === Auto-fulfill reservation START ===
+// try {
+//   const [reservations] = await pool.query(
+//     `SELECT * FROM reservations 
+//      WHERE BookID = ? AND Status = 'Pending'
+//      ORDER BY ReservedAt ASC LIMIT 1`,
+//     [bookId]
+//   );
+
+//   if (reservations.length > 0) {
+//     const reservation = reservations[0];
+
+//     // Fulfill the reservation
+//     await pool.query(
+//       `UPDATE reservations 
+//        SET Status = 'Fulfilled', FulfilledAt = NOW()
+//        WHERE ReservationID = ?`,
+//       [reservation.ReservationID]
+//     );
+
+//     // Decrease available copies again
+//     await pool.query(
+//       `UPDATE books 
+//        SET AvailableCopies = AvailableCopies - 1 
+//        WHERE BookID = ?`,
+//       [bookId]
+//     );
+
+//     console.log(`📘 Book auto-fulfilled to User ${reservation.UserID}`);
+//   }
+// } catch (fulfillError) {
+//   console.error('❌ Auto-fulfill failed:', fulfillError.message);
+//   // Don't throw — returning still succeeded
+// }
+// // === Auto-fulfill reservation END ===
+
+    return res.json({
+      message: 'Book returned successfully',
+      status: result.status,
+      fineAmount: result.fineAmount
+    });
+
+  } catch (error) {
+    console.error('Error returning book:', error);
+    res.status(500).json({ message: 'Error returning book', error: error.message });
+  }
+},
+
+  
+    // Update transaction status
+    updateTransactionStatus: async (req, res) => {
+      try {
+        const { transactionId } = req.params;
+        const { status } = req.body;
+        
+        // Validate status
+        const validStatuses = ['Borrowed', 'Returned', 'Overdue'];
+        if (!validStatuses.includes(status)) {
+          return res.status(400).json({ message: 'Invalid status' });
+        }
+        
+        // Get transaction details
+        const transaction = await TransactionModel.getById(transactionId);
+        
+        if (!transaction) {
+          return res.status(404).json({ message: 'Transaction not found' });
+        }
+        
+        // Only librarian or admin can update status
+        if (req.user.Role !== 'Admin' && req.user.Role !== 'Librarian') {
+          return res.status(403).json({ message: 'Access denied' });
+        }
+        
+        // Update status
+        const updated = await TransactionModel.updateStatus(transactionId, status);
+        
+        if (!updated) {
+          return res.status(400).json({ message: 'Failed to update transaction status' });
+        }
+        
+        res.json({ message: 'Transaction status updated successfully' });
+      } catch (error) {
+        console.error('Error updating transaction status:', error);
+        res.status(500).json({ message: 'Error updating transaction status' });
+      }
+    }
+  };
+  
+  module.exports = TransactionController;
+
+  // src/controllers/reservationController.js
+const ReservationModel = require('../models/reservation');
+const BookModel = require('../models/book');
+
+const ReservationController = {
+  // Get all reservations
+  getAllReservations: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { userId, bookId, status } = req.query;
+      const filters = { userId, bookId, status };
+      
+      const reservations = await ReservationModel.getAll(filters);
+      res.json({ reservations });
+    } catch (error) {
+      console.error('Error getting reservations:', error);
+      res.status(500).json({ message: 'Error fetching reservations' });
+    }
+  },
+
+  // Get reservation by ID
+  getReservationById: async (req, res) => {
+    try {
+      const reservationId = req.params.id;
+      const reservation = await ReservationModel.getById(reservationId);
+      
+      if (!reservation) {
+        return res.status(404).json({ message: 'Reservation not found' });
+      }
+      
+      res.json({ reservation });
+    } catch (error) {
+      console.error('Error getting reservation:', error);
+      res.status(500).json({ message: 'Error fetching reservation' });
+    }
+  },
+
+  // Get user reservations
+  getUserReservations: async (req, res) => {
+    try {
+      const userId = req.params.userId || req.user.UserID;
+      
+      // Check if user is requesting their own reservations or is admin/librarian
+      if (req.user.UserID !== parseInt(userId) && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      const reservations = await ReservationModel.getUserReservations(userId);
+      res.json({ reservations });
+    } catch (error) {
+      console.error('Error getting user reservations:', error);
+      res.status(500).json({ message: 'Error fetching user reservations' });
+    }
+  },
+
+  // Create reservation
+  createReservation: async (req, res) => {
+    try {
+      const { bookId, userId } = req.body;
+      const reserverId = userId || req.user.UserID;
+      
+      // Check if user can create reservation (librarian/admin can reserve for others)
+      if (reserverId !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Check if book exists
+      const book = await BookModel.getById(bookId);
+      if (!book) {
+        return res.status(404).json({ message: 'Book not found' });
+      }
+      
+      // Check if book is already available
+      if (book.AvailableCopies > 0) {
+        return res.status(400).json({ message: 'Book is available for borrowing, reservation not needed' });
+      }
+      
+      // Check if user already has an active reservation for this book
+      const alreadyReserved = await ReservationModel.isBookReservedByUser(reserverId, bookId);
+      if (alreadyReserved) {
+        return res.status(400).json({ message: 'User already has a pending reservation for this book' });
+      }
+      
+      // Set expiry date (default: 7 days from now)
+      const expiryDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      
+      // Create reservation
+      const reservationId = await ReservationModel.create(reserverId, bookId);
+      
+      res.status(201).json({
+        message: 'Reservation created successfully',
+        reservationId,
+        expiryDate
+      });
+    } catch (error) {
+      console.error('Error creating reservation:', error);
+      res.status(500).json({ message: 'Error creating reservation' });
+    }
+  },
+
+  // Update reservation status
+  updateReservationStatus: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      
+      // Check if reservation exists
+      const reservation = await ReservationModel.getById(id);
+      if (!reservation) {
+        return res.status(404).json({ message: 'Reservation not found' });
+      }
+      
+      // Check if user can update status (user's own reservation or admin/librarian)
+      if (reservation.UserID !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Check if status is valid
+      const validStatuses = ['Pending', 'Fulfilled', 'Cancelled', 'Expired'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+      
+      // Update status
+      const updated = await ReservationModel.updateStatus(id, status);
+      
+      if (!updated) {
+        return res.status(400).json({ message: 'Failed to update reservation' });
+      }
+      
+      res.json({ message: 'Reservation updated successfully' });
+    } catch (error) {
+      console.error('Error updating reservation:', error);
+      res.status(500).json({ message: 'Error updating reservation' });
+    }
+  },
+
+  // Cancel reservation
+  cancelReservation: async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Check if reservation exists
+      const reservation = await ReservationModel.getById(id);
+      if (!reservation) {
+        return res.status(404).json({ message: 'Reservation not found' });
+      }
+      
+      // Check if user can cancel (user's own reservation or admin/librarian)
+      if (reservation.UserID !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Check if reservation is already fulfilled or cancelled
+      if (reservation.Status !== 'Pending') {
+        return res.status(400).json({ message: `Reservation is already ${reservation.Status.toLowerCase()}` });
+      }
+      
+      // Update status to Cancelled
+      const updated = await ReservationModel.updateStatus(id, 'Cancelled');
+      
+      if (!updated) {
+        return res.status(400).json({ message: 'Failed to cancel reservation' });
+      }
+      
+      res.json({ message: 'Reservation cancelled successfully' });
+    } catch (error) {
+      console.error('Error cancelling reservation:', error);
+      res.status(500).json({ message: 'Error cancelling reservation' });
+    }
+  }
+};
+
+module.exports = ReservationController;
+
+// src/controllers/reportController.js
+const ReportModel = require('../models/report');
+
+const ReportController = {
+  // Get all reports
+  getAllReports: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { reportType, adminId, startDate, endDate } = req.query;
+      const filters = { reportType, adminId, startDate, endDate };
+      
+      const reports = await ReportModel.getAll(filters);
+      res.json({ reports });
+    } catch (error) {
+      console.error('Error getting reports:', error);
+      res.status(500).json({ message: 'Error fetching reports' });
+    }
+  },
+
+  // Get report by ID
+  getReportById: async (req, res) => {
+    try {
+      const reportId = req.params.id;
+      const report = await ReportModel.getById(reportId);
+      
+      if (!report) {
+        return res.status(404).json({ message: 'Report not found' });
+      }
+      
+      res.json({ report });
+    } catch (error) {
+      console.error('Error getting report:', error);
+      res.status(500).json({ message: 'Error fetching report' });
+    }
+  },
+
+  // Generate and save book inventory report
+  generateBookInventoryReport: async (req, res) => {
+    try {
+      // Generate report data
+      const reportData = await ReportModel.generateBookInventoryReport();
+      
+      // Save report to database
+      const reportId = await ReportModel.create({
+        reportType: 'Book Inventory',
+        adminId: req.user.UserID,
+        reportData
+      });
+      
+      res.status(201).json({
+        message: 'Book inventory report generated successfully',
+        reportId,
+        reportData
+      });
+    } catch (error) {
+      console.error('Error generating book inventory report:', error);
+      res.status(500).json({ message: 'Error generating report' });
+    }
+  },
+
+  // Generate and save user activity report
+  generateUserActivityReport: async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      
+      // Generate report data
+      const reportData = await ReportModel.generateUserActivityReport(startDate, endDate);
+      
+      // Save report to database
+      const reportId = await ReportModel.create({
+        reportType: 'User Activity',
+        adminId: req.user.UserID,
+        reportData
+      });
+      
+      res.status(201).json({
+        message: 'User activity report generated successfully',
+        reportId,
+        reportData
+      });
+    } catch (error) {
+      console.error('Error generating user activity report:', error);
+      res.status(500).json({ message: 'Error generating report' });
+    }
+  },
+
+  // Generate and save fine collection report
+  generateFineCollectionReport: async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      
+      // Generate report data
+      const reportData = await ReportModel.generateFineCollectionReport(startDate, endDate);
+      
+      // Save report to database
+      const reportId = await ReportModel.create({
+        reportType: 'Fine Collection',
+        adminId: req.user.UserID,
+        reportData
+      });
+      
+      res.status(201).json({
+        message: 'Fine collection report generated successfully',
+        reportId,
+        reportData
+      });
+    } catch (error) {
+      console.error('Error generating fine collection report:', error);
+      res.status(500).json({ message: 'Error generating report' });
+    }
+  },
+
+  // Generate and save book circulation report
+  generateBookCirculationReport: async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      
+      // Generate report data
+      const reportData = await ReportModel.generateBookCirculationReport(startDate, endDate);
+      
+      // Save report to database
+      const reportId = await ReportModel.create({
+        reportType: 'Book Circulation',
+        adminId: req.user.UserID,
+        reportData
+      });
+      
+      res.status(201).json({
+        message: 'Book circulation report generated successfully',
+        reportId,
+        reportData
+      });
+    } catch (error) {
+      console.error('Error generating book circulation report:', error);
+      res.status(500).json({ message: 'Error generating report' });
+    }
+  },
+
+  // Delete report
+  deleteReport: async (req, res) => {
+    try {
+      const reportId = req.params.id;
+      
+      // Check if report exists
+      const report = await ReportModel.getById(reportId);
+      
+      if (!report) {
+        return res.status(404).json({ message: 'Report not found' });
+      }
+      
+      // Delete report
+      const deleted = await ReportModel.delete(reportId);
+      
+      if (!deleted) {
+        return res.status(400).json({ message: 'Failed to delete report' });
+      }
+      
+      res.json({ message: 'Report deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting report:', error);
+      res.status(500).json({ message: 'Error deleting report' });
+    }
+  }
+};
+
+module.exports = ReportController;
+
+// src/controllers/paymentController.js
+const PaymentModel = require('../models/payment');
+
+const PaymentController = {
+  // Get all payments
+  getAllPayments: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { userId, paymentMethod, startDate, endDate } = req.query;
+      const filters = { userId, paymentMethod, startDate, endDate };
+      
+      const payments = await PaymentModel.getAll(filters);
+      res.json({ payments });
+    } catch (error) {
+      console.error('Error getting payments:', error);
+      res.status(500).json({ message: 'Error fetching payments' });
+    }
+  },
+
+  // Get payment by ID
+  getPaymentById: async (req, res) => {
+    try {
+      const paymentId = req.params.id;
+      const payment = await PaymentModel.getById(paymentId);
+      
+      if (!payment) {
+        return res.status(404).json({ message: 'Payment not found' });
+      }
+      
+      res.json({ payment });
+    } catch (error) {
+      console.error('Error getting payment:', error);
+      res.status(500).json({ message: 'Error fetching payment' });
+    }
+  },
+
+  // Get user's payments
+  getUserPayments: async (req, res) => {
+    try {
+      const userId = req.params.userId || req.user.UserID;
+      
+      // Check if user is requesting their own payments or is admin/librarian
+      if (req.user.UserID !== parseInt(userId) && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      const payments = await PaymentModel.getUserPayments(userId);
+      
+      res.json({
+        payments,
+        total: payments.reduce((sum, payment) => sum + payment.AmountPaid, 0)
+      });
+    } catch (error) {
+      console.error('Error getting user payments:', error);
+      res.status(500).json({ message: 'Error fetching user payments' });
+    }
+  },
+
+  // Create payment
+  createPayment: async (req, res) => {
+    try {
+      const { userId, transactionId, amountPaid, paymentMethod } = req.body;
+      
+      // Check if user is creating their own payment or is admin/librarian
+      if (userId !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Create payment
+      const paymentId = await PaymentModel.create({
+        userId,
+        transactionId,
+        amountPaid,
+        paymentMethod: paymentMethod || 'Cash'
+      });
+      
+      res.status(201).json({
+        message: 'Payment created successfully',
+        paymentId
+      });
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      res.status(500).json({ message: 'Error creating payment' });
+    }
+  }
+};
+
+module.exports = PaymentController;
+
+// src/controllers/fineController.js
+const FineModel = require('../models/fine');
+
+const FineController = {
+  // Get all fines
+  getAllFines: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { userId, status } = req.query;
+      const filters = { userId, status };
+      
+      const fines = await FineModel.getAll(filters);
+      res.json({ fines });
+    } catch (error) {
+      console.error('Error getting fines:', error);
+      res.status(500).json({ message: 'Error fetching fines' });
+    }
+  },
+
+  // Get fine by ID
+  getFineById: async (req, res) => {
+    try {
+      const fineId = req.params.id;
+      const fine = await FineModel.getById(fineId);
+      
+      if (!fine) {
+        return res.status(404).json({ message: 'Fine not found' });
+      }
+      
+      res.json({ fine });
+    } catch (error) {
+      console.error('Error getting fine:', error);
+      res.status(500).json({ message: 'Error fetching fine' });
+    }
+  },
+
+  // Get user's fines
+  getUserFines: async (req, res) => {
+    try {
+      const userId = req.params.userId || req.user.UserID;
+      
+      // Check if user is requesting their own fines or is admin/librarian
+      if (req.user.UserID !== parseInt(userId) && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      const fines = await FineModel.getUserFines(userId);
+      const unpaidTotal = await FineModel.getUserUnpaidFinesTotal(userId);
+      
+      res.json({ 
+        fines, 
+        unpaidTotal,
+        fineCount: fines.length,
+        unpaidCount: fines.filter(fine => fine.Status === 'Unpaid').length
+      });
+    } catch (error) {
+      console.error('Error getting user fines:', error);
+      res.status(500).json({ message: 'Error fetching user fines' });
+    }
+  },
+
+  // Pay fine
+  payFine: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { paymentMethod = 'Cash' } = req.body;
+      
+      // Check if fine exists
+      const fine = await FineModel.getById(id);
+      if (!fine) {
+        return res.status(404).json({ message: 'Fine not found' });
+      }
+      
+      // Check if user can pay (user's own fine or admin/librarian)
+      if (fine.UserID !== req.user.UserID && 
+          req.user.Role !== 'Admin' && 
+          req.user.Role !== 'Librarian') {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+      
+      // Check if fine is already paid
+      if (fine.Status === 'Paid') {
+        return res.status(400).json({ message: 'Fine already paid' });
+      }
+      
+      // Process payment
+      const paymentId = await FineModel.payFine(id, paymentMethod);
+      
+      res.json({
+        message: 'Fine paid successfully',
+        paymentId,
+        paymentMethod,
+        amountPaid: fine.Amount
+      });
+    } catch (error) {
+      console.error('Error paying fine:', error);
+      res.status(500).json({ message: 'Error processing payment' });
+    }
+  }
+};
+
+module.exports = FineController;
+
+// src/controllers/categoryController.js
+const CategoryModel = require('../models/category');
+
+const CategoryController = {
+  // Get all categories
+  getAllCategories: async (req, res) => {
+    try {
+      const categories = await CategoryModel.getAll();
+      res.json({ categories });
+    } catch (error) {
+      console.error('Error getting categories:', error);
+      res.status(500).json({ message: 'Error fetching categories' });
+    }
+  },
+
+  // Get category by ID
+  getCategoryById: async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      const category = await CategoryModel.getById(categoryId);
+      
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found' });
+      }
+      
+      res.json({ category });
+    } catch (error) {
+      console.error('Error getting category:', error);
+      res.status(500).json({ message: 'Error fetching category' });
+    }
+  },
+
+  // Create new category
+  createCategory: async (req, res) => {
+    try {
+      const { categoryName, description } = req.body;
+      
+      if (!categoryName) {
+        return res.status(400).json({ message: 'Category name is required' });
+      }
+      
+      const categoryId = await CategoryModel.create({ categoryName, description });
+      
+      res.status(201).json({
+        message: 'Category created successfully',
+        categoryId
+      });
+    } catch (error) {
+      console.error('Error creating category:', error);
+      res.status(500).json({ message: 'Error creating category' });
+    }
+  },
+
+  // Update category
+  updateCategory: async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      const { categoryName, description } = req.body;
+      
+      // Check if category exists
+      const category = await CategoryModel.getById(categoryId);
+      
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found' });
+      }
+      
+      const updated = await CategoryModel.update(categoryId, { categoryName, description });
+      
+      if (!updated) {
+        return res.status(400).json({ message: 'Failed to update category' });
+      }
+      
+      res.json({ message: 'Category updated successfully' });
+    } catch (error) {
+      console.error('Error updating category:', error);
+      res.status(500).json({ message: 'Error updating category' });
+    }
+  },
+
+  // Delete category
+  deleteCategory: async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      
+      // Check if category exists
+      const category = await CategoryModel.getById(categoryId);
+      
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found' });
+      }
+      
+      // Check if category has books
+      const books = await CategoryModel.getBooks(categoryId);
+      
+      if (books.length > 0) {
+        return res.status(400).json({ 
+          message: 'Cannot delete category with associated books',
+          count: books.length
+        });
+      }
+      
+      const deleted = await CategoryModel.delete(categoryId);
+      
+      if (!deleted) {
+        return res.status(400).json({ message: 'Failed to delete category' });
+      }
+      
+      res.json({ message: 'Category deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      res.status(500).json({ message: 'Error deleting category' });
+    }
+  },
+
+  // Get books by category
+  getCategoryBooks: async (req, res) => {
+    try {
+      const categoryId = req.params.id;
+      
+      // Check if category exists
+      const category = await CategoryModel.getById(categoryId);
+      
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found' });
+      }
+      
+      const books = await CategoryModel.getBooks(categoryId);
+      
+      res.json({
+        category,
+        books
+      });
+    } catch (error) {
+      console.error('Error getting category books:', error);
+      res.status(500).json({ message: 'Error fetching category books' });
+    }
+  }
+};
+
+module.exports = CategoryController;
+
+// src/controllers/bookController.js
+const BookModel = require('../models/book');
+
+const BookController = {
+  // Get all books
+  getAllBooks: async (req, res) => {
+    try {
+      // Extract filter parameters from query
+      const { title, author, category, available } = req.query;
+      const filters = { title, author, category, available: available === 'true' };
+      
+      const books = await BookModel.getAll(filters);
+      res.json({ books });
+    } catch (error) {
+      console.error('Error getting books:', error);
+      res.status(500).json({ message: 'Error fetching books' });
+    }
+  },
+
+  // Get book by ID
+  getBookById: async (req, res) => {
+    try {
+      const bookId = req.params.id;
+      const book = await BookModel.getById(bookId);
+      
+      if (!book) {
+        return res.status(404).json({ message: 'Book not found' });
+      }
+      
+      res.json({ book });
+    } catch (error) {
+      console.error('Error getting book:', error);
+      res.status(500).json({ message: 'Error fetching book' });
+    }
+  },
+
+  // Create new book
+  createBook: async (req, res) => {
+    try {
+      const {
+        title,
+        author,
+        isbn,
+        publicationYear,
+        publisher,
+        totalCopies,
+        categoryId
+      } = req.body;
+      
+      // Validate required fields
+      if (!title || !author) {
+        return res.status(400).json({ message: 'Title and author are required' });
+      }
+      
+      const bookId = await BookModel.create({
+        title,
+        author,
+        isbn,
+        publicationYear,
+        publisher,
+        totalCopies: totalCopies || 1,
+        categoryId
+      });
+      
+      res.status(201).json({
+        message: 'Book created successfully',
+        bookId
+      });
+    } catch (error) {
+      console.error('Error creating book:', error);
+      res.status(500).json({ message: 'Error creating book' });
+    }
+  },
+
+  // Update book
+  updateBook: async (req, res) => {
+    try {
+      const bookId = req.params.id;
+      const {
+        title,
+        author,
+        isbn,
+        publicationYear,
+        publisher,
+        totalCopies,
+        availableCopies,
+        categoryId
+      } = req.body;
+      
+      // Check if book exists
+      const book = await BookModel.getById(bookId);
+      
+      if (!book) {
+        return res.status(404).json({ message: 'Book not found' });
+      }
+      
+      const updated = await BookModel.update(bookId, {
+        title,
+        author,
+        isbn,
+        publicationYear,
+        publisher,
+        totalCopies,
+        availableCopies,
+        categoryId
+      });
+      
+      if (!updated) {
+        return res.status(400).json({ message: 'Failed to update book' });
+      }
+      
+      res.json({ message: 'Book updated successfully' });
+    } catch (error) {
+      console.error('Error updating book:', error);
+      res.status(500).json({ message: 'Error updating book' });
+    }
+  },
+
+  // Delete book
+  deleteBook: async (req, res) => {
+    try {
+      const bookId = req.params.id;
+      
+      // Check if book exists
+      const book = await BookModel.getById(bookId);
+      
+      if (!book) {
+        return res.status(404).json({ message: 'Book not found' });
+      }
+      
+      const deleted = await BookModel.delete(bookId);
+      
+      if (!deleted) {
+        return res.status(400).json({ message: 'Failed to delete book' });
+      }
+      
+      res.json({ message: 'Book deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting book:', error);
+      res.status(500).json({ message: 'Error deleting book' });
+    }
+  }
+};
+
+module.exports = BookController;
+
+// src/controllers/authController.js
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const UserModel = require('../models/user');
+
+const AuthController = {
+  // Register a new user
+  register: async (req, res) => {
+    try {
+      const { name, email, password, role } = req.body;
+      
+      // Check if user already exists
+      const existingUser = await UserModel.getByEmail(email);
+      
+      if (existingUser) {
+        return res.status(400).json({ message: 'User already exists' });
+      }
+      
+      // Create new user
+      const userId = await UserModel.create({ name, email, password, role });
+      
+      // Generate JWT token
+      const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN
+      });
+      
+      res.status(201).json({
+        message: 'User registered successfully',
+        token,
+        user: {
+          id: userId,
+          name,
+          email,
+          role: role || 'Student'
+        }
+      });
+    } catch (error) {
+      console.error('Registration error:', error);
+      res.status(500).json({ message: 'Error registering user' });
+    }
+  },
+
+  // Login user
+  login: async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      // Check if user exists
+      const user = await UserModel.getByEmail(email);
+      
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      // Check password
+      const isMatch = await bcrypt.compare(password, user.Password);
+      
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      // Generate JWT token
+      const token = jwt.sign({ id: user.UserID }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN
+      });
+      
+      res.json({
+        message: 'Login successful',
+        token,
+        user: {
+          id: user.UserID,
+          name: user.Name,
+          email: user.Email,
+          role: user.Role
+        }
+      });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ message: 'Error logging in' });
+    }
+  }
+};
+
+module.exports = AuthController;

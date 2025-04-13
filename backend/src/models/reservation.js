@@ -88,6 +88,13 @@ const ReservationModel = {
     
     return result.affectedRows > 0;
   },
+  isBookReservedByUser: async (userId, bookId) => {
+    const [rows] = await pool.query(
+      'SELECT * FROM reservations WHERE UserID = ? AND BookID = ? AND Status = "Pending"',
+      [userId, bookId]
+    );
+    return rows.length > 0;
+  },
 
   // Check for expired reservations
   checkExpiredReservations: async () => {

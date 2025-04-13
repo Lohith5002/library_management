@@ -89,7 +89,7 @@ const ReservationController = {
       const expiryDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       
       // Create reservation
-      const reservationId = await ReservationModel.create(reserverId, bookId, expiryDate);
+      const reservationId = await ReservationModel.create(reserverId, bookId);
       
       res.status(201).json({
         message: 'Reservation created successfully',
