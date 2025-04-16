@@ -104,6 +104,15 @@ const FineModel = {
       connection.release();
     }
   },
+  // Get total unpaid fines for a user
+  getUserUnpaidFinesTotal: async (userId) => {
+    const [rows] = await pool.query(
+      `SELECT SUM(Amount) AS total FROM fines WHERE UserID = ? AND Status = 'Unpaid'`,
+      [userId]
+    );
+    return rows[0].total || 0;
+  },
+
 
   // Update fine
   updateFine: async (id, amount) => {
