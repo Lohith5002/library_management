@@ -138,6 +138,7 @@ function ReservationManagement() {
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell>ID</TableCell>
             <TableCell>User</TableCell>
             <TableCell>Book</TableCell>
             <TableCell>Reservation Date</TableCell>
@@ -149,6 +150,7 @@ function ReservationManagement() {
         <TableBody>
           {reservations?.map((reservation) => (
             <TableRow key={reservation.ReservationID}>
+              <TableCell>{reservation.ReservationID}</TableCell>
               <TableCell>{reservation.UserName}</TableCell>
               <TableCell>{reservation.BookTitle}</TableCell>
               <TableCell>

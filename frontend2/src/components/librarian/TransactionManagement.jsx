@@ -153,6 +153,7 @@ function TransactionManagement() {
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell>ID</TableCell>
             <TableCell>User</TableCell>
             <TableCell>Book</TableCell>
             <TableCell>Borrow Date</TableCell>
@@ -165,6 +166,7 @@ function TransactionManagement() {
         <TableBody>
           {transactions?.map((transaction) => (
             <TableRow key={transaction.TransactionID}>
+              <TableCell>{transaction.TransactionID}</TableCell>
               <TableCell>{transaction.UserName}</TableCell>
               <TableCell>{transaction.BookTitle}</TableCell>
               <TableCell>

@@ -72,6 +72,7 @@ function FineManagement() {
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell>ID</TableCell>
             <TableCell>User</TableCell>
             <TableCell>Book</TableCell>
             <TableCell>Amount</TableCell>
@@ -82,6 +83,7 @@ function FineManagement() {
         <TableBody>
           {fines?.map((fine) => (
             <TableRow key={fine.FineID}>
+              <TableCell>{fine.FineID}</TableCell>
               <TableCell>{fine.UserName}</TableCell>
               <TableCell>{fine.BookTitle}</TableCell>
               <TableCell>${fine.Amount}</TableCell>

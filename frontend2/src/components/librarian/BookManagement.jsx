@@ -13,6 +13,10 @@ import {
   DialogActions,
   Box,
   TextField,
+  MenuItem,
+  Select,
+  InputLabel,
+  FormControl,
 } from "@mui/material";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -23,6 +27,11 @@ function BookManagement() {
   const [open, setOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [selectedBook, setSelectedBook] = useState(null);
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterAuthor, setFilterAuthor] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("title");
+
   const { register, handleSubmit, reset } = useForm();
 
   const { data: books, isLoading } = useQuery("books", async () => {
@@ -107,15 +116,65 @@ function BookManagement() {
     }
   };
 
+  const filteredBooks = books
+    ?.filter((book) =>
+      book.Title.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .filter((book) =>
+      filterCategory ? book.CategoryID === filterCategory : true
+    )
+    .filter((book) =>
+      filterAuthor
+        ? book.Author.toLowerCase().includes(filterAuthor.toLowerCase())
+        : true
+    )
+    .sort((a, b) => {
+      if (sortBy === "title") {
+        return a.Title.localeCompare(b.Title);
+      } else if (sortBy === "publicationYear") {
+        return a.PublicationYear - b.PublicationYear;
+      } else if (sortBy === "availableCopies") {
+        return a.AvailableCopies - b.AvailableCopies;
+      }
+      return 0;
+    });
+
   if (isLoading) return <div>Loading...</div>;
 
   return (
     <>
       <Button onClick={handleCreate}>Add Book</Button>
+      <Box sx={{ display: "flex", gap: 2, marginBottom: 2 }}>
+        <TextField
+          label="Search by Title"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          fullWidth
+        />
+
+        <TextField
+          label="Filter by Author"
+          value={filterAuthor}
+          onChange={(e) => setFilterAuthor(e.target.value)}
+          fullWidth
+        />
+        <FormControl fullWidth>
+          <InputLabel>Sort By</InputLabel>
+          <Select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            label="Sort By"
+          >
+            <MenuItem value="title">Title</MenuItem>
+            <MenuItem value="publicationYear">Publication Year</MenuItem>
+            <MenuItem value="availableCopies">Available Copies</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
       <Table>
         <TableHead>
           <TableRow>
-            <TableCell>BookID</TableCell>
+            <TableCell>ID</TableCell>
             <TableCell>Title</TableCell>
             <TableCell>Author</TableCell>
             <TableCell>ISBN</TableCell>
@@ -125,7 +184,7 @@ function BookManagement() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {books?.map((book) => (
+          {filteredBooks?.map((book) => (
             <TableRow key={book.BookID}>
               <TableCell>{book.BookID}</TableCell>
               <TableCell>{book.Title}</TableCell>

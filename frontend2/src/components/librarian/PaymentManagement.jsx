@@ -64,6 +64,7 @@ function PaymentManagement() {
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell>ID</TableCell>
             <TableCell>User</TableCell>
             <TableCell>Book</TableCell>
             <TableCell>Amount</TableCell>
@@ -74,6 +75,7 @@ function PaymentManagement() {
         <TableBody>
           {payments?.map((payment) => (
             <TableRow key={payment.PaymentID}>
+              <TableCell>{payment.PaymentID}</TableCell>
               <TableCell>{payment.UserName}</TableCell>
               <TableCell>{payment.BookTitle || "N/A"}</TableCell>
               <TableCell>${payment.AmountPaid}</TableCell>

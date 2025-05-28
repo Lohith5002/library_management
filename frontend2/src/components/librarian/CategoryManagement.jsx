@@ -110,6 +110,7 @@ function CategoryManagement() {
       <Table>
         <TableHead>
           <TableRow>
+            <TableCell>ID</TableCell>
             <TableCell>Name</TableCell>
             <TableCell>Description</TableCell>
             <TableCell>Actions</TableCell>
@@ -118,6 +119,7 @@ function CategoryManagement() {
         <TableBody>
           {categories?.map((category) => (
             <TableRow key={category.CategoryID}>
+              <TableCell>{category.CategoryID}</TableCell>
               <TableCell>{category.CategoryName}</TableCell>
               <TableCell>{category.Description}</TableCell>
               <TableCell>
